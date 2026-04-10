@@ -269,14 +269,16 @@ app.post('/api/calculate/dellin', async (req, res) => {
       }
     }
 
+    // Moscow default KLADR code
+    const MOSCOW_CODE = '7700000000000000000000000';
     const senderCode = senderCityCode || process.env.SENDER_CITY_CODE || null;
     const senderCitySearch = process.env.SENDER_CITY || 'Москва';
 
-    // If we don't have a sender city code, look it up
+    // If we don't have a sender city code, look it up via KLADR
     let actualSenderCode = senderCode;
     if (!actualSenderCode) {
       try {
-        const placesResp = await fetch('https://api.dellin.ru/v1/public/places.json', {
+        const placesResp = await fetch('https://api.dellin.ru/v2/public/kladr.json', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ appkey: process.env.DELLIN_APP_KEY, q: senderCitySearch })
@@ -284,6 +286,7 @@ app.post('/api/calculate/dellin', async (req, res) => {
         const placesData = await placesResp.json();
         if (placesData.cities && placesData.cities.length > 0) {
           actualSenderCode = placesData.cities[0].code;
+          console.log(`Sender city resolved: ${senderCitySearch} -> ${actualSenderCode}`);
         }
       } catch (e) {
         console.error('Failed to lookup sender city:', e.message);
@@ -291,7 +294,9 @@ app.post('/api/calculate/dellin', async (req, res) => {
     }
 
     if (!actualSenderCode) {
-      return res.status(400).json({ error: 'Не удалось определить город отправления' });
+      // Use hardcoded Moscow code as last resort
+      actualSenderCode = MOSCOW_CODE;
+      console.log('Using default Moscow KLADR code');
     }
 
     if (!receiverCityCode) {
