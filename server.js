@@ -290,7 +290,7 @@ async function lookupCity(query) {
 
 app.post('/api/calculate/dellin', async (req, res) => {
   try {
-    const { senderCityCode, senderCityID, receiverCityCode, receiverCityID, receiverAddress, cargo } = req.body;
+    const { senderCityCode, senderCityID, receiverCityCode, receiverCityID, receiverCityName, receiverAddress, cargo } = req.body;
     if (!process.env.DELLIN_APP_KEY) return res.status(400).json({ error: 'Не настроен DELLIN_APP_KEY.' });
 
     if (!dellinSessionID && process.env.DELLIN_LOGIN) {
@@ -367,7 +367,12 @@ app.post('/api/calculate/dellin', async (req, res) => {
           rb.delivery.arrival.terminalID = receiverTerminal.id;
         } else {
           if (!receiverAddress) { results.push({ variant: v.label, error: 'Укажите адрес для расчёта до двери' }); continue; }
-          rb.delivery.arrival.address = { search: receiverAddress };
+          // Prepend city name for Dellin address search
+          const cityName = receiverCityName || receiverTerminal?.city || '';
+          const fullAddress = cityName && !receiverAddress.toLowerCase().includes(cityName.toLowerCase())
+            ? `${cityName}, ${receiverAddress}`
+            : receiverAddress;
+          rb.delivery.arrival.address = { search: fullAddress };
           rb.delivery.arrival.time = { worktimeStart: '09:00', worktimeEnd: '21:00' };
         }
 

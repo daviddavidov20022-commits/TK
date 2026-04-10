@@ -571,7 +571,7 @@ async function doCalculation() {
       try {
         const r = await loggedFetch(`${API_BASE}/api/calculate/dellin`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ senderCityCode: selectedSenderCity.code, senderCityID: selectedSenderCity.cityID, receiverCityCode: selectedReceiverCity.code, receiverCityID: selectedReceiverCity.cityID, receiverAddress, cargo })
+          body: JSON.stringify({ senderCityCode: selectedSenderCity.code, senderCityID: selectedSenderCity.cityID, receiverCityCode: selectedReceiverCity.code, receiverCityID: selectedReceiverCity.cityID, receiverCityName: selectedReceiverCity.name, receiverAddress, cargo })
         });
         const d = await r.json(); allResults.push(d.error ? { carrier: 'dellin', carrierName: 'Деловые Линии', error: d.error, results: [] } : d);
       } catch (e) { allResults.push({ carrier: 'dellin', carrierName: 'Деловые Линии', error: e.message, results: [] }); }
