@@ -316,18 +316,21 @@ app.post('/api/calculate/dellin', async (req, res) => {
     try { senderTerminal = await getDefaultTerminal(senderCity.cityID); } catch (e) {}
     try { receiverTerminal = await getDefaultTerminal(receiverCity.cityID); } catch (e) {}
 
-    // Date
-    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
-    const dow = tomorrow.getDay();
-    if (dow === 0) tomorrow.setDate(tomorrow.getDate() + 1);
-    if (dow === 6) tomorrow.setDate(tomorrow.getDate() + 2);
-    const produceDate = tomorrow.toISOString().split('T')[0];
+    // Date — next business day (skip weekends reliably)
+    const produceDate = (() => {
+      const d = new Date();
+      d.setDate(d.getDate() + 2); // at least +2 days to give time
+      while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+      return d.toISOString().split('T')[0];
+    })();
+    console.log('Produce date:', produceDate);
 
     // Cargo
     const totalWeight = cargo.weight * (cargo.quantity || 1);
     const totalVolume = cargo.volume || parseFloat((cargo.length * cargo.width * cargo.height * (cargo.quantity || 1)).toFixed(6));
     const cargoBody = {
       quantity: String(cargo.quantity || 1),
+      weight: String(cargo.weight), // per-piece weight (REQUIRED!)
       length: String(cargo.length), width: String(cargo.width), height: String(cargo.height),
       totalVolume: String(totalVolume), totalWeight: String(totalWeight),
       oversizedWeight: String(totalWeight), oversizedVolume: String(totalVolume),
@@ -368,10 +371,12 @@ app.post('/api/calculate/dellin', async (req, res) => {
           rb.delivery.arrival.time = { worktimeStart: '09:00', worktimeEnd: '21:00' };
         }
 
+        console.log(`[DL] ${v.label}:`, JSON.stringify(rb).slice(0, 600));
         const resp = await fetch('https://api.dellin.ru/v2/calculator.json', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rb)
         });
         const data = await resp.json();
+        console.log(`[DL] ${v.label} response:`, data.data?.price || JSON.stringify(data.errors)?.slice(0, 200));
 
         if (data.data?.price) {
           let deliveryDays = null;
