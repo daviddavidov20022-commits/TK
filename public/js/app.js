@@ -2,6 +2,7 @@
 const API_BASE = '';
 let currentProduct = null;
 let productsCache = [];
+let selectedReceiverCity = null; // { code, name, searchString }
 
 // ==================== LOG SYSTEM ====================
 const AppLog = {
@@ -187,6 +188,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initProducts();
   initModal();
   initLog();
+  initCityAutocomplete();
   loadProducts();
 });
 
@@ -203,6 +205,119 @@ function initTabs() {
       document.getElementById(`tab-${tab}`).classList.add('active');
     });
   });
+}
+
+// ==================== CITY AUTOCOMPLETE ====================
+function initCityAutocomplete() {
+  const cityInput = document.getElementById('calc-receiver-city');
+  const dropdown = document.getElementById('city-dropdown');
+  let debounceTimer = null;
+  let currentRequest = 0;
+
+  cityInput.addEventListener('input', () => {
+    const query = cityInput.value.trim();
+    selectedReceiverCity = null; // Reset selection when user types
+    
+    // Update visual state
+    cityInput.classList.remove('city-selected');
+
+    if (query.length < 2) {
+      dropdown.classList.add('hidden');
+      dropdown.innerHTML = '';
+      return;
+    }
+
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(async () => {
+      const requestId = ++currentRequest;
+      
+      try {
+        const resp = await fetch(`${API_BASE}/api/dellin/cities?q=${encodeURIComponent(query)}`);
+        const cities = await resp.json();
+
+        // Ignore stale responses
+        if (requestId !== currentRequest) return;
+
+        if (cities.length === 0) {
+          dropdown.innerHTML = '<div class="dropdown-empty">Город не найден</div>';
+          dropdown.classList.remove('hidden');
+          return;
+        }
+
+        dropdown.innerHTML = cities.slice(0, 10).map(city => {
+          const searchStr = city.search || city.name || '';
+          const displayName = searchStr || city.name;
+          return `<div class="dropdown-item" data-code="${escapeHtml(city.code || city.cityID || '')}" data-name="${escapeHtml(displayName)}" data-search="${escapeHtml(searchStr)}">
+            <span class="dropdown-city-name">${escapeHtml(displayName)}</span>
+          </div>`;
+        }).join('');
+
+        dropdown.classList.remove('hidden');
+
+        // Add click handlers
+        dropdown.querySelectorAll('.dropdown-item').forEach(item => {
+          item.addEventListener('click', () => {
+            selectCity(item.dataset.code, item.dataset.name, item.dataset.search);
+          });
+        });
+      } catch (err) {
+        console.error('City search error:', err);
+      }
+    }, 300);
+  });
+
+  // Close dropdown on click outside
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.city-input-wrapper')) {
+      dropdown.classList.add('hidden');
+    }
+  });
+
+  // Keyboard navigation
+  cityInput.addEventListener('keydown', (e) => {
+    const items = dropdown.querySelectorAll('.dropdown-item');
+    const activeItem = dropdown.querySelector('.dropdown-item.active');
+    
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!activeItem) {
+        items[0]?.classList.add('active');
+      } else {
+        activeItem.classList.remove('active');
+        const next = activeItem.nextElementSibling;
+        if (next && next.classList.contains('dropdown-item')) next.classList.add('active');
+        else items[0]?.classList.add('active');
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (activeItem) {
+        activeItem.classList.remove('active');
+        const prev = activeItem.previousElementSibling;
+        if (prev && prev.classList.contains('dropdown-item')) prev.classList.add('active');
+        else items[items.length - 1]?.classList.add('active');
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (activeItem) {
+        selectCity(activeItem.dataset.code, activeItem.dataset.name, activeItem.dataset.search);
+      }
+    } else if (e.key === 'Escape') {
+      dropdown.classList.add('hidden');
+    }
+  });
+}
+
+function selectCity(code, name, searchString) {
+  const cityInput = document.getElementById('calc-receiver-city');
+  const dropdown = document.getElementById('city-dropdown');
+  
+  selectedReceiverCity = { code, name, searchString };
+  cityInput.value = name;
+  cityInput.classList.add('city-selected');
+  dropdown.classList.add('hidden');
+  
+  AppLog.ok(`Выбран город: ${name} (код: ${code})`);
+  showToast(`Город: ${name}`, 'success');
 }
 
 // ==================== PRODUCTS CRUD ====================
@@ -520,6 +635,13 @@ async function doCalculation() {
     return;
   }
 
+  // Check if city was selected from autocomplete
+  if (!selectedReceiverCity) {
+    showToast('Выберите город из выпадающего списка подсказок', 'error');
+    document.getElementById('calc-receiver-city').focus();
+    return;
+  }
+
   const carrier = document.querySelector('input[name="carrier"]:checked').value;
   const quantity = parseInt(document.getElementById('calc-quantity').value) || 1;
 
@@ -538,10 +660,6 @@ async function doCalculation() {
     quantity: quantity
   };
 
-  const fullAddress = receiverAddress 
-    ? `${receiverCity}, ${receiverAddress}` 
-    : receiverCity;
-
   const allResults = [];
 
   AppLog.info(`Запуск расчёта: ТК=${carrier}, город=${receiverCity}, кол-во=${quantity}`);
@@ -556,7 +674,8 @@ async function doCalculation() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            receiverAddress: fullAddress,
+            receiverCityCode: selectedReceiverCity.code,
+            receiverAddress: receiverAddress || '',
             cargo
           })
         });
@@ -583,7 +702,7 @@ async function doCalculation() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            receiverCity: receiverCity,
+            receiverCity: selectedReceiverCity.name.split(',')[0].trim(),
             cargo
           })
         });

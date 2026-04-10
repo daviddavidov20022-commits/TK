@@ -115,7 +115,10 @@
 
           <div class="form-group">
             <label for="calc-receiver-city">Город получения</label>
-            <input type="text" id="calc-receiver-city" placeholder="Например: Санкт-Петербург" autocomplete="off">
+            <div class="city-input-wrapper">
+              <input type="text" id="calc-receiver-city" placeholder="Начните вводить название города..." autocomplete="off">
+              <div class="city-dropdown hidden" id="city-dropdown"></div>
+            </div>
           </div>
 
           <div class="form-group">

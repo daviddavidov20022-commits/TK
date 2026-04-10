@@ -59,7 +59,7 @@ app.post('/api/products', (req, res) => {
   }
 
   if (products.find(p => p.article === article)) {
-    return res.status(409).json({ error: 'Товар с таким артикулом уже существует' });
+    return res.status(400).json({ error: 'Товар с таким артикулом уже существует' });
   }
 
   const product = {
@@ -79,7 +79,7 @@ app.post('/api/products', (req, res) => {
 
   products.push(product);
   writeProducts(products);
-  res.status(201).json(product);
+  res.json(product);
 });
 
 // PUT update product
@@ -89,20 +89,18 @@ app.put('/api/products/:article', (req, res) => {
   if (idx === -1) return res.status(404).json({ error: 'Товар не найден' });
 
   const { name, weight, length, width, height, quantity, category, notes } = req.body;
-
-  if (name) products[idx].name = name;
-  if (weight) products[idx].weight = parseFloat(weight);
-  if (length) products[idx].length = parseFloat(length);
-  if (width) products[idx].width = parseFloat(width);
-  if (height) products[idx].height = parseFloat(height);
-  if (quantity !== undefined) products[idx].quantity = parseInt(quantity);
-  if (category !== undefined) products[idx].category = category;
-  if (notes !== undefined) products[idx].notes = notes;
-
-  products[idx].volume = parseFloat(
-    (products[idx].length * products[idx].width * products[idx].height).toFixed(6)
-  );
-  products[idx].updatedAt = new Date().toISOString();
+  products[idx] = {
+    ...products[idx],
+    name: name || products[idx].name,
+    weight: parseFloat(weight) || products[idx].weight,
+    length: parseFloat(length) || products[idx].length,
+    width: parseFloat(width) || products[idx].width,
+    height: parseFloat(height) || products[idx].height,
+    volume: parseFloat((parseFloat(length) * parseFloat(width) * parseFloat(height)).toFixed(6)),
+    quantity: parseInt(quantity) || products[idx].quantity,
+    category: category !== undefined ? category : products[idx].category,
+    notes: notes !== undefined ? notes : products[idx].notes
+  };
 
   writeProducts(products);
   res.json(products[idx]);
@@ -113,22 +111,23 @@ app.delete('/api/products/:article', (req, res) => {
   let products = readProducts();
   const idx = products.findIndex(p => p.article === req.params.article);
   if (idx === -1) return res.status(404).json({ error: 'Товар не найден' });
-
+  
   products.splice(idx, 1);
   writeProducts(products);
   res.json({ success: true });
 });
 
-// ==================== DELLIN (Деловые Линии) API ====================
+// ==================== DELLIN AUTH ====================
 
 let dellinSessionID = null;
 
 async function dellinAuth() {
-  if (!process.env.DELLIN_APP_KEY || !process.env.DELLIN_LOGIN) {
-    throw new Error('Деловые Линии: API ключи не настроены. Заполните .env файл.');
+  if (!process.env.DELLIN_LOGIN || !process.env.DELLIN_PASSWORD) {
+    console.warn('Dellin auth skipped: no login/password in .env');
+    return;
   }
   try {
-    const resp = await fetch('https://api.dellin.ru/v1/customers/login.json', {
+    const resp = await fetch('https://api.dellin.ru/v3/auth/login.json', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -138,28 +137,155 @@ async function dellinAuth() {
       })
     });
     const data = await resp.json();
-    if (data.sessionID) {
-      dellinSessionID = data.sessionID;
-      return data.sessionID;
+    if (data.data && data.data.sessionID) {
+      dellinSessionID = data.data.sessionID;
+      console.log('Dellin auth OK, sessionID:', dellinSessionID.slice(0, 8) + '...');
+    } else {
+      console.warn('Dellin auth failed:', JSON.stringify(data.errors || data));
     }
-    throw new Error(data.errors ? JSON.stringify(data.errors) : 'Ошибка авторизации ДЛ');
   } catch (err) {
-    throw new Error('Ошибка авторизации Деловые Линии: ' + err.message);
+    console.warn('Dellin auth error:', err.message);
   }
 }
 
-// Dellin calculator endpoint
+// ==================== DELLIN SEARCH CITIES ====================
+
+app.get('/api/dellin/cities', async (req, res) => {
+  try {
+    const query = req.query.q;
+    if (!query || query.length < 2) return res.json([]);
+
+    const resp = await fetch('https://api.dellin.ru/v1/public/places.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        appkey: process.env.DELLIN_APP_KEY,
+        q: query
+      })
+    });
+    const data = await resp.json();
+    res.json(data.cities || []);
+  } catch (err) {
+    console.error('Dellin cities search error:', err.message);
+    res.json([]);
+  }
+});
+
+// ==================== DELLIN SEARCH STREETS ====================
+
+app.get('/api/dellin/streets', async (req, res) => {
+  try {
+    const { cityID, q } = req.query;
+    if (!cityID || !q || q.length < 2) return res.json([]);
+
+    const resp = await fetch('https://api.dellin.ru/v1/public/streets.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        appkey: process.env.DELLIN_APP_KEY,
+        cityID: cityID,
+        q: q
+      })
+    });
+    const data = await resp.json();
+    res.json(data.streets || []);
+  } catch (err) {
+    console.error('Dellin streets search error:', err.message);
+    res.json([]);
+  }
+});
+
+// ==================== DELLIN TERMINALS ====================
+
+app.get('/api/dellin/terminals', async (req, res) => {
+  try {
+    const { cityID } = req.query;
+    if (!cityID) return res.json([]);
+
+    const resp = await fetch('https://api.dellin.ru/v1/public/request_terminals.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        appkey: process.env.DELLIN_APP_KEY,
+        cityID: cityID
+      })
+    });
+    const data = await resp.json();
+    // Return terminal list
+    const terminals = [];
+    if (data.terminals) {
+      for (const t of data.terminals) {
+        terminals.push({
+          id: t.id,
+          name: t.name,
+          address: t.address,
+          cityID: t.cityID
+        });
+      }
+    }
+    res.json(terminals);
+  } catch (err) {
+    console.error('Dellin terminals error:', err.message);
+    res.json([]);
+  }
+});
+
+// ==================== DELLIN CALCULATOR ====================
+
 app.post('/api/calculate/dellin', async (req, res) => {
   try {
-    const { senderCity, receiverAddress, cargo } = req.body;
+    const { senderCityCode, receiverCityCode, receiverAddress, receiverStreetCode, cargo } = req.body;
 
+    if (!process.env.DELLIN_APP_KEY) {
+      return res.status(400).json({ error: 'Не настроен DELLIN_APP_KEY. Добавьте его в переменные окружения.' });
+    }
+
+    // Try to authenticate if we have credentials
     if (!dellinSessionID && process.env.DELLIN_LOGIN) {
       try {
         await dellinAuth();
       } catch (err) {
-        console.warn('Dellin auth error, using public API (no personal discounts):', err.message);
+        console.warn('Dellin auth error, using public API:', err.message);
       }
     }
+
+    const senderCode = senderCityCode || process.env.SENDER_CITY_CODE || null;
+    const senderCitySearch = process.env.SENDER_CITY || 'Москва';
+
+    // If we don't have a sender city code, look it up
+    let actualSenderCode = senderCode;
+    if (!actualSenderCode) {
+      try {
+        const placesResp = await fetch('https://api.dellin.ru/v1/public/places.json', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ appkey: process.env.DELLIN_APP_KEY, q: senderCitySearch })
+        });
+        const placesData = await placesResp.json();
+        if (placesData.cities && placesData.cities.length > 0) {
+          actualSenderCode = placesData.cities[0].code;
+        }
+      } catch (e) {
+        console.error('Failed to lookup sender city:', e.message);
+      }
+    }
+
+    if (!actualSenderCode) {
+      return res.status(400).json({ error: 'Не удалось определить город отправления' });
+    }
+
+    if (!receiverCityCode) {
+      return res.status(400).json({ error: 'Не указан город получения. Выберите город из подсказок.' });
+    }
+
+    // Get tomorrow's date for produceDate
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    // Skip weekends
+    const dow = tomorrow.getDay();
+    if (dow === 0) tomorrow.setDate(tomorrow.getDate() + 1); // Sunday -> Monday
+    if (dow === 6) tomorrow.setDate(tomorrow.getDate() + 2); // Saturday -> Monday
+    const produceDate = tomorrow.toISOString().split('T')[0];
 
     // Calculate for all variants
     const variants = [
@@ -173,29 +299,36 @@ app.post('/api/calculate/dellin', async (req, res) => {
 
     for (const variant of variants) {
       try {
-        const receiverCityName = receiverAddress ? receiverAddress.split(',')[0].trim() : '';
-        const senderCityName = senderCity || process.env.SENDER_CITY || 'Москва';
-
         const requestBody = {
           appkey: process.env.DELLIN_APP_KEY,
           delivery: {
             deliveryType: { type: 'auto' },
             derival: {
+              produceDate: produceDate,
               variant: variant.derival,
-              city: senderCityName
+              city: actualSenderCode
             },
             arrival: {
               variant: variant.arrival,
-              city: receiverCityName
+              city: receiverCityCode
             }
           },
           cargo: {
-            quantity: cargo.quantity || 1,
-            length: cargo.length,
-            width: cargo.width,
-            height: cargo.height,
-            totalVolume: cargo.volume || parseFloat((cargo.length * cargo.width * cargo.height * (cargo.quantity || 1)).toFixed(6)),
-            totalWeight: cargo.weight * (cargo.quantity || 1)
+            quantity: String(cargo.quantity || 1),
+            length: String(cargo.length),
+            width: String(cargo.width),
+            height: String(cargo.height),
+            totalVolume: String(cargo.volume || parseFloat((cargo.length * cargo.width * cargo.height * (cargo.quantity || 1)).toFixed(6))),
+            totalWeight: String(cargo.weight * (cargo.quantity || 1)),
+            oversizedWeight: String(cargo.weight * (cargo.quantity || 1)),
+            oversizedVolume: String(cargo.volume || parseFloat((cargo.length * cargo.width * cargo.height * (cargo.quantity || 1)).toFixed(6))),
+            freight: [{
+              length: String(cargo.length),
+              width: String(cargo.width),
+              height: String(cargo.height),
+              weight: String(cargo.weight),
+              quantity: String(cargo.quantity || 1)
+            }]
           }
         };
 
@@ -203,9 +336,10 @@ app.post('/api/calculate/dellin', async (req, res) => {
           requestBody.sessionID = dellinSessionID;
         }
 
+        // For address variants, add address details
         if (variant.derival === 'address') {
           requestBody.delivery.derival.address = {
-            search: process.env.SENDER_ADDRESS || senderCityName
+            search: process.env.SENDER_ADDRESS || senderCitySearch
           };
           requestBody.delivery.derival.time = {
             worktimeStart: '09:00',
@@ -214,14 +348,31 @@ app.post('/api/calculate/dellin', async (req, res) => {
         }
 
         if (variant.arrival === 'address') {
-          requestBody.delivery.arrival.address = {
-            search: receiverAddress
-          };
+          const addressSearch = receiverAddress || '';
+          if (receiverStreetCode) {
+            requestBody.delivery.arrival.address = {
+              street: receiverStreetCode,
+              house: '1'
+            };
+          } else if (addressSearch) {
+            requestBody.delivery.arrival.address = {
+              search: addressSearch
+            };
+          } else {
+            // Skip address variants if no address provided
+            results.push({
+              variant: variant.label,
+              error: 'Укажите адрес для расчёта доставки до двери'
+            });
+            continue;
+          }
           requestBody.delivery.arrival.time = {
             worktimeStart: '09:00',
             worktimeEnd: '21:00'
           };
         }
+
+        console.log(`Dellin request [${variant.label}]:`, JSON.stringify(requestBody).slice(0, 500));
 
         const resp = await fetch('https://api.dellin.ru/v2/calculator.json', {
           method: 'POST',
@@ -230,25 +381,33 @@ app.post('/api/calculate/dellin', async (req, res) => {
         });
 
         const data = await resp.json();
+        console.log(`Dellin response [${variant.label}]:`, JSON.stringify(data).slice(0, 300));
 
-        if (data.data) {
+        if (data.data && data.data.price) {
           results.push({
             variant: variant.label,
             derivalType: variant.derival,
             arrivalType: variant.arrival,
-            price: data.data.price || data.data.priceMinimal,
+            price: data.data.price,
             priceMin: data.data.priceMinimal,
             priceMax: data.data.priceMaximal,
             deliveryDays: data.data.orderDates?.deliveryDate || null,
             arrivalDate: data.data.orderDates?.arrivalDate || null,
             derivalDate: data.data.orderDates?.derivalDate || null,
-            insurance: data.data.insurance || null,
-            raw: data.data
+            insurance: data.data.insurance || null
           });
         } else if (data.errors) {
+          const errMsg = Array.isArray(data.errors)
+            ? data.errors.map(e => e.title || e.detail || JSON.stringify(e)).join(', ')
+            : JSON.stringify(data.errors);
           results.push({
             variant: variant.label,
-            error: Array.isArray(data.errors) ? data.errors.map(e => e.title || e).join(', ') : JSON.stringify(data.errors)
+            error: errMsg
+          });
+        } else {
+          results.push({
+            variant: variant.label,
+            error: 'Нет данных в ответе API'
           });
         }
       } catch (err) {
@@ -271,7 +430,7 @@ app.post('/api/calculate/dellin', async (req, res) => {
 
 // ==================== PEK (ПЭК) API ====================
 
-// PEK public calculator (no auth needed)
+// PEK uses the official public JSON API
 app.post('/api/calculate/pek', async (req, res) => {
   try {
     const { senderCity, receiverCity, cargo } = req.body;
@@ -309,10 +468,6 @@ app.post('/api/calculate/pek', async (req, res) => {
     if (!receiverCityId) {
       return res.status(400).json({ error: `Город получения "${receiverCity}" не найден в справочнике ПЭК` });
     }
-
-    // Calculate volume in cubic meters
-    const volumeM3 = cargo.length * cargo.width * cargo.height * (cargo.quantity || 1);
-    const totalWeight = cargo.weight * (cargo.quantity || 1);
 
     // Build request params
     const params = new URLSearchParams({
@@ -352,11 +507,10 @@ app.post('/api/calculate/pek', async (req, res) => {
     });
     const calcData = await calcResp.json();
 
-    // Parse PEK response - they return different service types
+    // Parse PEK response
     const results = [];
 
     if (calcData.autotracing) {
-      // autotracing contains multiple service options
       if (calcData.autotracing.auto) {
         results.push({
           variant: 'Авто (склад → склад)',
@@ -396,19 +550,17 @@ app.post('/api/calculate/pek', async (req, res) => {
     }
 
     // Avia options
-    if (calcData.avia) {
-      if (calcData.avia.price) {
-        results.push({
-          variant: 'Авиа',
-          derivalType: 'terminal',
-          arrivalType: 'terminal',
-          price: calcData.avia.price,
-          deliveryDays: calcData.avia.periods || null
-        });
-      }
+    if (calcData.avia && calcData.avia.price) {
+      results.push({
+        variant: 'Авиа',
+        derivalType: 'terminal',
+        arrivalType: 'terminal',
+        price: calcData.avia.price,
+        deliveryDays: calcData.avia.periods || null
+      });
     }
 
-    // If we got raw numbered entries (alternative response format)
+    // Fallback for alternative response format
     if (results.length === 0 && typeof calcData === 'object') {
       for (const [key, val] of Object.entries(calcData)) {
         if (val && typeof val === 'object' && val.price) {
@@ -429,28 +581,6 @@ app.post('/api/calculate/pek', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: 'Ошибка расчёта ПЭК: ' + err.message });
-  }
-});
-
-// ==================== DELLIN SEARCH CITIES ====================
-
-app.get('/api/dellin/cities', async (req, res) => {
-  try {
-    const query = req.query.q;
-    if (!query || query.length < 2) return res.json([]);
-
-    const resp = await fetch('https://api.dellin.ru/v1/public/places.json', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        appkey: process.env.DELLIN_APP_KEY,
-        q: query
-      })
-    });
-    const data = await resp.json();
-    res.json(data.cities || []);
-  } catch (err) {
-    res.json([]);
   }
 });
 
