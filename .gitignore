@@ -2,4 +2,6 @@ node_modules/
 .env
 data/products.json
 data/settings.json
+data/kits.json
+data/images/
 .DS_Store
