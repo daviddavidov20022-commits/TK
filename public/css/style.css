@@ -1541,6 +1541,20 @@ textarea {
   font-weight: 500;
 }
 
+.dropdown-city-region {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
+.dropdown-badge {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--accent-4);
+  margin-left: 8px;
+  opacity: 0.8;
+}
+
 .dropdown-empty {
   padding: 16px;
   text-align: center;

@@ -239,16 +239,19 @@ function initCityAutocomplete() {
         if (requestId !== currentRequest) return;
 
         if (cities.length === 0) {
-          dropdown.innerHTML = '<div class="dropdown-empty">Город не найден</div>';
+          dropdown.innerHTML = '<div class="dropdown-empty">Город не найден. Проверьте написание.</div>';
           dropdown.classList.remove('hidden');
           return;
         }
 
         dropdown.innerHTML = cities.slice(0, 10).map(city => {
-          const searchStr = city.search || city.name || '';
-          const displayName = searchStr || city.name;
-          return `<div class="dropdown-item" data-code="${escapeHtml(city.code || city.cityID || '')}" data-name="${escapeHtml(displayName)}" data-search="${escapeHtml(searchStr)}">
+          const displayName = city.name || '';
+          const region = city.region ? ` (${city.region})` : '';
+          const terminalBadge = city.isTerminal ? '<span class="dropdown-badge">🏭 Терминал</span>' : '';
+          return `<div class="dropdown-item" data-code="${escapeHtml(city.code || '')}" data-name="${escapeHtml(displayName)}" data-search="${escapeHtml(displayName)}">
             <span class="dropdown-city-name">${escapeHtml(displayName)}</span>
+            <span class="dropdown-city-region">${escapeHtml(region)}</span>
+            ${terminalBadge}
           </div>`;
         }).join('');
 

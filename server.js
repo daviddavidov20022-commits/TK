@@ -155,7 +155,12 @@ app.get('/api/dellin/cities', async (req, res) => {
     const query = req.query.q;
     if (!query || query.length < 2) return res.json([]);
 
-    const resp = await fetch('https://api.dellin.ru/v1/public/places.json', {
+    if (!process.env.DELLIN_APP_KEY) {
+      console.error('DELLIN_APP_KEY is not set!');
+      return res.json([]);
+    }
+
+    const resp = await fetch('https://api.dellin.ru/v2/public/kladr.json', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -164,7 +169,22 @@ app.get('/api/dellin/cities', async (req, res) => {
       })
     });
     const data = await resp.json();
-    res.json(data.cities || []);
+    
+    if (data.cities && data.cities.length > 0) {
+      // Map to a clean format for the frontend
+      const cities = data.cities.map(c => ({
+        code: c.code,
+        name: c.searchString || c.aString,
+        fullName: c.aString,
+        region: c.region_name || '',
+        isTerminal: c.isTerminal === 1,
+        cityID: c.cityID
+      }));
+      res.json(cities);
+    } else {
+      console.warn('Dellin KLADR: no cities found for query:', query);
+      res.json([]);
+    }
   } catch (err) {
     console.error('Dellin cities search error:', err.message);
     res.json([]);
