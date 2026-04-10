@@ -25,7 +25,14 @@ function readProducts() {
 }
 
 function writeProducts(products) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(products, null, 2), 'utf-8');
+  try {
+    if (!fs.existsSync(path.dirname(DATA_FILE))) {
+      fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
+    }
+    fs.writeFileSync(DATA_FILE, JSON.stringify(products, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Ошибка сохранения товаров:', err);
+  }
 }
 
 // GET all products
