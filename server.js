@@ -173,16 +173,20 @@ app.post('/api/calculate/dellin', async (req, res) => {
 
     for (const variant of variants) {
       try {
+        const receiverCityName = receiverAddress ? receiverAddress.split(',')[0].trim() : '';
+        const senderCityName = senderCity || process.env.SENDER_CITY || 'Москва';
+
         const requestBody = {
           appkey: process.env.DELLIN_APP_KEY,
           delivery: {
             deliveryType: { type: 'auto' },
             derival: {
               variant: variant.derival,
-              city: senderCity || process.env.SENDER_CITY || 'Москва'
+              city: senderCityName
             },
             arrival: {
-              variant: variant.arrival
+              variant: variant.arrival,
+              city: receiverCityName
             }
           },
           cargo: {
@@ -190,7 +194,7 @@ app.post('/api/calculate/dellin', async (req, res) => {
             length: cargo.length,
             width: cargo.width,
             height: cargo.height,
-            totalVolume: cargo.volume || (cargo.length * cargo.width * cargo.height * (cargo.quantity || 1)),
+            totalVolume: cargo.volume || parseFloat((cargo.length * cargo.width * cargo.height * (cargo.quantity || 1)).toFixed(6)),
             totalWeight: cargo.weight * (cargo.quantity || 1)
           }
         };
@@ -199,18 +203,13 @@ app.post('/api/calculate/dellin', async (req, res) => {
           requestBody.sessionID = dellinSessionID;
         }
 
-        // Use address search for address variants
         if (variant.derival === 'address') {
           requestBody.delivery.derival.address = {
-            search: process.env.SENDER_ADDRESS || process.env.SENDER_CITY || 'Москва'
+            search: process.env.SENDER_ADDRESS || senderCityName
           };
           requestBody.delivery.derival.time = {
             worktimeStart: '09:00',
             worktimeEnd: '18:00'
-          };
-        } else {
-          requestBody.delivery.derival.address = {
-            search: process.env.SENDER_CITY || 'Москва'
           };
         }
 
@@ -221,10 +220,6 @@ app.post('/api/calculate/dellin', async (req, res) => {
           requestBody.delivery.arrival.time = {
             worktimeStart: '09:00',
             worktimeEnd: '21:00'
-          };
-        } else {
-          requestBody.delivery.arrival.address = {
-            search: receiverAddress
           };
         }
 
