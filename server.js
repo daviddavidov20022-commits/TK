@@ -290,67 +290,120 @@ app.get('/api/dellin/terminals', async (req, res) => {
 
 // ==================== DELLIN CALCULATOR ====================
 
+// Helper: get default terminal for a cityID
+async function getDefaultTerminal(cityID) {
+  const resp = await fetch('https://api.dellin.ru/v1/public/request_terminals.json', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ appkey: process.env.DELLIN_APP_KEY, cityID: String(cityID) })
+  });
+  const data = await resp.json();
+  if (data.terminals && data.terminals.length > 0) {
+    // Prefer the default terminal, otherwise take the first one
+    const def = data.terminals.find(t => t.default) || data.terminals[0];
+    return { id: def.id, name: def.name, address: def.address, city: def.city };
+  }
+  return null;
+}
+
+// Helper: look up city info from KLADR
+async function lookupCity(query) {
+  const resp = await fetch('https://api.dellin.ru/v2/public/kladr.json', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ appkey: process.env.DELLIN_APP_KEY, q: query })
+  });
+  const data = await resp.json();
+  if (data.cities && data.cities.length > 0) {
+    return data.cities[0]; // { code, cityID, searchString, ... }
+  }
+  return null;
+}
+
 app.post('/api/calculate/dellin', async (req, res) => {
   try {
-    const { senderCityCode, receiverCityCode, receiverAddress, receiverStreetCode, cargo } = req.body;
+    const { senderCityCode, senderCityID, receiverCityCode, receiverCityID, receiverAddress, cargo } = req.body;
 
     if (!process.env.DELLIN_APP_KEY) {
-      return res.status(400).json({ error: 'Не настроен DELLIN_APP_KEY. Добавьте его в переменные окружения.' });
+      return res.status(400).json({ error: 'Не настроен DELLIN_APP_KEY.' });
     }
 
-    // Try to authenticate if we have credentials
+    // Auth (optional, for personal discounts)
     if (!dellinSessionID && process.env.DELLIN_LOGIN) {
-      try {
-        await dellinAuth();
-      } catch (err) {
-        console.warn('Dellin auth error, using public API:', err.message);
-      }
+      try { await dellinAuth(); } catch (err) { console.warn('Auth failed:', err.message); }
     }
 
-    // Moscow default KLADR code
-    const MOSCOW_CODE = '7700000000000000000000000';
-    const senderCode = senderCityCode || process.env.SENDER_CITY_CODE || null;
-    const senderCitySearch = process.env.SENDER_CITY || 'Москва';
-
-    // If we don't have a sender city code, look it up via KLADR
-    let actualSenderCode = senderCode;
-    if (!actualSenderCode) {
-      try {
-        const placesResp = await fetch('https://api.dellin.ru/v2/public/kladr.json', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ appkey: process.env.DELLIN_APP_KEY, q: senderCitySearch })
-        });
-        const placesData = await placesResp.json();
-        if (placesData.cities && placesData.cities.length > 0) {
-          actualSenderCode = placesData.cities[0].code;
-          console.log(`Sender city resolved: ${senderCitySearch} -> ${actualSenderCode}`);
-        }
-      } catch (e) {
-        console.error('Failed to lookup sender city:', e.message);
-      }
+    // --- Resolve sender city ---
+    let senderCity = null;
+    if (senderCityID) {
+      senderCity = { cityID: senderCityID, code: senderCityCode };
+    } else if (senderCityCode) {
+      // Look up cityID from code by searching
+      const info = await lookupCity(process.env.SENDER_CITY || 'Москва');
+      senderCity = info ? { cityID: info.cityID, code: info.code } : null;
+    } else {
+      // Fallback: look up default sender city
+      const info = await lookupCity(process.env.SENDER_CITY || 'Москва');
+      senderCity = info ? { cityID: info.cityID, code: info.code } : null;
     }
 
-    if (!actualSenderCode) {
-      // Use hardcoded Moscow code as last resort
-      actualSenderCode = MOSCOW_CODE;
-      console.log('Using default Moscow KLADR code');
+    // --- Resolve receiver city ---
+    let receiverCity = null;
+    if (receiverCityID) {
+      receiverCity = { cityID: receiverCityID, code: receiverCityCode };
+    } else if (receiverCityCode) {
+      // We have code but need cityID - search for it
+      const info = await lookupCity(receiverCityCode);
+      receiverCity = info ? { cityID: info.cityID, code: info.code } : { cityID: null, code: receiverCityCode };
     }
 
-    if (!receiverCityCode) {
-      return res.status(400).json({ error: 'Не указан город получения. Выберите город из подсказок.' });
+    if (!senderCity) {
+      return res.status(400).json({ error: 'Не удалось определить город отправления' });
+    }
+    if (!receiverCity) {
+      return res.status(400).json({ error: 'Не указан город получения' });
     }
 
-    // Get tomorrow's date for produceDate
+    // --- Get terminals ---
+    let senderTerminal = null;
+    let receiverTerminal = null;
+    
+    try {
+      senderTerminal = await getDefaultTerminal(senderCity.cityID);
+    } catch (e) { console.warn('Could not get sender terminal:', e.message); }
+    
+    try {
+      receiverTerminal = await getDefaultTerminal(receiverCity.cityID);
+    } catch (e) { console.warn('Could not get receiver terminal:', e.message); }
+
+    // --- Produce date (next business day) ---
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    // Skip weekends
     const dow = tomorrow.getDay();
-    if (dow === 0) tomorrow.setDate(tomorrow.getDate() + 1); // Sunday -> Monday
-    if (dow === 6) tomorrow.setDate(tomorrow.getDate() + 2); // Saturday -> Monday
+    if (dow === 0) tomorrow.setDate(tomorrow.getDate() + 1);
+    if (dow === 6) tomorrow.setDate(tomorrow.getDate() + 2);
     const produceDate = tomorrow.toISOString().split('T')[0];
 
-    // Calculate for all variants
+    // --- Cargo ---
+    const cargoBody = {
+      quantity: String(cargo.quantity || 1),
+      length: String(cargo.length),
+      width: String(cargo.width),
+      height: String(cargo.height),
+      totalVolume: String(cargo.volume || parseFloat((cargo.length * cargo.width * cargo.height * (cargo.quantity || 1)).toFixed(6))),
+      totalWeight: String(cargo.weight * (cargo.quantity || 1)),
+      oversizedWeight: String(cargo.weight * (cargo.quantity || 1)),
+      oversizedVolume: String(cargo.volume || parseFloat((cargo.length * cargo.width * cargo.height * (cargo.quantity || 1)).toFixed(6))),
+      freight: [{
+        length: String(cargo.length),
+        width: String(cargo.width),
+        height: String(cargo.height),
+        weight: String(cargo.weight),
+        quantity: String(cargo.quantity || 1)
+      }]
+    };
+
+    // --- Calculate variants ---
     const variants = [
       { derival: 'terminal', arrival: 'terminal', label: 'Терминал → Терминал' },
       { derival: 'terminal', arrival: 'address', label: 'Терминал → Адрес' },
@@ -368,74 +421,53 @@ app.post('/api/calculate/dellin', async (req, res) => {
             deliveryType: { type: 'auto' },
             derival: {
               produceDate: produceDate,
-              variant: variant.derival,
-              city: actualSenderCode
+              variant: variant.derival
             },
             arrival: {
-              variant: variant.arrival,
-              city: receiverCityCode
+              variant: variant.arrival
             }
           },
-          cargo: {
-            quantity: String(cargo.quantity || 1),
-            length: String(cargo.length),
-            width: String(cargo.width),
-            height: String(cargo.height),
-            totalVolume: String(cargo.volume || parseFloat((cargo.length * cargo.width * cargo.height * (cargo.quantity || 1)).toFixed(6))),
-            totalWeight: String(cargo.weight * (cargo.quantity || 1)),
-            oversizedWeight: String(cargo.weight * (cargo.quantity || 1)),
-            oversizedVolume: String(cargo.volume || parseFloat((cargo.length * cargo.width * cargo.height * (cargo.quantity || 1)).toFixed(6))),
-            freight: [{
-              length: String(cargo.length),
-              width: String(cargo.width),
-              height: String(cargo.height),
-              weight: String(cargo.weight),
-              quantity: String(cargo.quantity || 1)
-            }]
-          }
+          cargo: cargoBody
         };
 
         if (dellinSessionID) {
           requestBody.sessionID = dellinSessionID;
         }
 
-        // For address variants, add address details
-        if (variant.derival === 'address') {
-          requestBody.delivery.derival.address = {
-            search: process.env.SENDER_ADDRESS || senderCitySearch
-          };
-          requestBody.delivery.derival.time = {
-            worktimeStart: '09:00',
-            worktimeEnd: '18:00'
-          };
-        }
-
-        if (variant.arrival === 'address') {
-          const addressSearch = receiverAddress || '';
-          if (receiverStreetCode) {
-            requestBody.delivery.arrival.address = {
-              street: receiverStreetCode,
-              house: '1'
-            };
-          } else if (addressSearch) {
-            requestBody.delivery.arrival.address = {
-              search: addressSearch
-            };
+        // DERIVAL (откуда)
+        if (variant.derival === 'terminal') {
+          if (senderTerminal) {
+            requestBody.delivery.derival.terminalID = senderTerminal.id;
           } else {
-            // Skip address variants if no address provided
-            results.push({
-              variant: variant.label,
-              error: 'Укажите адрес для расчёта доставки до двери'
-            });
+            // No terminal found, skip
+            results.push({ variant: variant.label, error: 'Нет терминала ДЛ в городе отправления' });
             continue;
           }
-          requestBody.delivery.arrival.time = {
-            worktimeStart: '09:00',
-            worktimeEnd: '21:00'
+        } else {
+          // address
+          requestBody.delivery.derival.address = {
+            search: process.env.SENDER_ADDRESS || senderTerminal?.city || 'Москва'
           };
+          requestBody.delivery.derival.time = { worktimeStart: '09:00', worktimeEnd: '18:00' };
         }
 
-        console.log(`Dellin request [${variant.label}]:`, JSON.stringify(requestBody).slice(0, 500));
+        // ARRIVAL (куда)
+        if (variant.arrival === 'terminal') {
+          if (receiverTerminal) {
+            requestBody.delivery.arrival.terminalID = receiverTerminal.id;
+          } else {
+            results.push({ variant: variant.label, error: 'Нет терминала ДЛ в городе получения' });
+            continue;
+          }
+        } else {
+          if (receiverAddress) {
+            requestBody.delivery.arrival.address = { search: receiverAddress };
+          } else {
+            results.push({ variant: variant.label, error: 'Укажите адрес для расчёта до двери' });
+            continue;
+          }
+          requestBody.delivery.arrival.time = { worktimeStart: '09:00', worktimeEnd: '21:00' };
+        }
 
         const resp = await fetch('https://api.dellin.ru/v2/calculator.json', {
           method: 'POST',
@@ -444,46 +476,57 @@ app.post('/api/calculate/dellin', async (req, res) => {
         });
 
         const data = await resp.json();
-        console.log(`Dellin response [${variant.label}]:`, JSON.stringify(data).slice(0, 300));
 
         if (data.data && data.data.price) {
+          // Calculate delivery days
+          let deliveryDays = null;
+          if (data.data.orderDates) {
+            const dates = data.data.orderDates;
+            const from = dates.arrivalToOspSender || dates.derivalFromOspSender;
+            const to = dates.giveoutFromOspReceiver || dates.arrivalToOspReceiver;
+            if (from && to) {
+              const d1 = new Date(from);
+              const d2 = new Date(to);
+              deliveryDays = Math.ceil((d2 - d1) / (1000 * 60 * 60 * 24));
+            }
+          }
+
+          const terminalInfo = {};
+          if (variant.derival === 'terminal' && senderTerminal) {
+            terminalInfo.senderTerminal = senderTerminal.name;
+          }
+          if (variant.arrival === 'terminal' && data.data.arrival?.terminals) {
+            const defT = data.data.arrival.terminals.find(t => t.default) || data.data.arrival.terminals[0];
+            if (defT) terminalInfo.receiverTerminal = defT.name;
+          }
+
           results.push({
             variant: variant.label,
             derivalType: variant.derival,
             arrivalType: variant.arrival,
             price: data.data.price,
-            priceMin: data.data.priceMinimal,
-            priceMax: data.data.priceMaximal,
-            deliveryDays: data.data.orderDates?.deliveryDate || null,
-            arrivalDate: data.data.orderDates?.arrivalDate || null,
-            derivalDate: data.data.orderDates?.derivalDate || null,
-            insurance: data.data.insurance || null
+            deliveryDays: deliveryDays,
+            arrivalDate: data.data.orderDates?.giveoutFromOspReceiver || data.data.orderDates?.arrivalToOspReceiver || null,
+            ...terminalInfo
           });
         } else if (data.errors) {
           const errMsg = Array.isArray(data.errors)
             ? data.errors.map(e => e.title || e.detail || JSON.stringify(e)).join(', ')
             : JSON.stringify(data.errors);
-          results.push({
-            variant: variant.label,
-            error: errMsg
-          });
+          results.push({ variant: variant.label, error: errMsg });
         } else {
-          results.push({
-            variant: variant.label,
-            error: 'Нет данных в ответе API'
-          });
+          results.push({ variant: variant.label, error: 'Нет данных' });
         }
       } catch (err) {
-        results.push({
-          variant: variant.label,
-          error: err.message
-        });
+        results.push({ variant: variant.label, error: err.message });
       }
     }
 
     res.json({
       carrier: 'dellin',
       carrierName: 'Деловые Линии',
+      senderTerminal: senderTerminal ? senderTerminal.name : null,
+      receiverTerminal: receiverTerminal ? receiverTerminal.name : null,
       results
     });
   } catch (err) {

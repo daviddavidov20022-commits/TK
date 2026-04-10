@@ -152,15 +152,15 @@ document.addEventListener('DOMContentLoaded', () => {
   initProducts();
   initModal();
   initLog();
-  initCityAutocomplete('calc-sender-city', 'sender-city-dropdown', (code, name) => {
-    selectedSenderCity = { code, name };
+  initCityAutocomplete('calc-sender-city', 'sender-city-dropdown', (code, name, cityID) => {
+    selectedSenderCity = { code, name, cityID };
     document.getElementById('calc-sender-city').classList.add('city-selected');
-    AppLog.ok(`Город отправления: ${name} (код: ${code})`);
+    AppLog.ok(`Город отправления: ${name} (код: ${code}, cityID: ${cityID})`);
   });
-  initCityAutocomplete('calc-receiver-city', 'city-dropdown', (code, name) => {
-    selectedReceiverCity = { code, name };
+  initCityAutocomplete('calc-receiver-city', 'city-dropdown', (code, name, cityID) => {
+    selectedReceiverCity = { code, name, cityID };
     document.getElementById('calc-receiver-city').classList.add('city-selected');
-    AppLog.ok(`Город получения: ${name} (код: ${code})`);
+    AppLog.ok(`Город получения: ${name} (код: ${code}, cityID: ${cityID})`);
     showToast(`Город: ${name}`, 'success');
   });
   initSenderCitySave();
@@ -218,7 +218,7 @@ function initCityAutocomplete(inputId, dropdownId, onSelect) {
           const displayName = city.name || '';
           const region = city.region ? ` (${city.region})` : '';
           const terminalBadge = city.isTerminal ? '<span class="dropdown-badge">🏭 Терминал</span>' : '';
-          return `<div class="dropdown-item" data-code="${escapeHtml(city.code || '')}" data-name="${escapeHtml(displayName)}">
+          return `<div class="dropdown-item" data-code="${escapeHtml(city.code || '')}" data-name="${escapeHtml(displayName)}" data-cityid="${city.cityID || ''}">
             <span class="dropdown-city-name">${escapeHtml(displayName)}</span>
             <span class="dropdown-city-region">${escapeHtml(region)}</span>
             ${terminalBadge}
@@ -231,7 +231,7 @@ function initCityAutocomplete(inputId, dropdownId, onSelect) {
           item.addEventListener('click', () => {
             cityInput.value = item.dataset.name;
             dropdown.classList.add('hidden');
-            onSelect(item.dataset.code, item.dataset.name);
+            onSelect(item.dataset.code, item.dataset.name, item.dataset.cityid);
           });
         });
       } catch (err) {
@@ -258,7 +258,7 @@ function initCityAutocomplete(inputId, dropdownId, onSelect) {
       if (activeItem) { activeItem.classList.remove('active'); (activeItem.previousElementSibling?.classList.contains('dropdown-item') ? activeItem.previousElementSibling : items[items.length - 1])?.classList.add('active'); }
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (activeItem) { cityInput.value = activeItem.dataset.name; dropdown.classList.add('hidden'); onSelect(activeItem.dataset.code, activeItem.dataset.name); }
+      if (activeItem) { cityInput.value = activeItem.dataset.name; dropdown.classList.add('hidden'); onSelect(activeItem.dataset.code, activeItem.dataset.name, activeItem.dataset.cityid); }
     } else if (e.key === 'Escape') { dropdown.classList.add('hidden'); }
   });
 }
@@ -554,7 +554,9 @@ async function doCalculation() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             senderCityCode: selectedSenderCity.code,
+            senderCityID: selectedSenderCity.cityID,
             receiverCityCode: selectedReceiverCity.code,
+            receiverCityID: selectedReceiverCity.cityID,
             receiverAddress: receiverAddress || '',
             cargo
           })
