@@ -2,7 +2,7 @@
 const API_BASE = '';
 let currentProduct = null;
 let currentKit = null;
-let calcMode = 'product'; // 'product' or 'kit'
+let calcMode = 'product'; // 'product' or 'kit' — determined automatically
 let productsCache = [];
 let kitsCache = [];
 let selectedSenderCity = null;
@@ -220,7 +220,11 @@ function initProducts() {
 }
 
 function editProduct(article) { const p = productsCache.find(x => x.article === article); if (p) openProductModal(p); }
-function useInCalc(article) { document.querySelector('[data-tab="calculator"]').click(); setCalcMode('product'); document.getElementById('calc-article').value = article; findProductForCalc(); }
+function useInCalc(article) {
+  document.querySelector('[data-tab="calculator"]').click();
+  document.getElementById('calc-article').value = article;
+  findArticleForCalc();
+}
 
 async function deleteProduct(article) {
   if (!confirm(`Удалить товар ${article}?`)) return;
@@ -302,7 +306,7 @@ function updateVolumePreview() {
 
 // ==================== KITS ====================
 async function loadKits() {
-  try { const r = await loggedFetch(`${API_BASE}/api/kits`); kitsCache = await r.json(); renderKitsList(); updateKitSelect(); } catch (e) { console.error('Kits load error:', e); }
+  try { const r = await loggedFetch(`${API_BASE}/api/kits`); kitsCache = await r.json(); renderKitsList(); } catch (e) { console.error('Kits load error:', e); }
 }
 
 function renderKitsList(filter = '') {
@@ -321,7 +325,7 @@ function renderKitsList(filter = '') {
       </div>
       <div class="product-actions">
         <button class="btn btn-accent btn-sm" onclick="editKit('${esc(k.id)}')" title="Редактировать">✏️</button>
-        <button class="btn btn-ghost btn-sm" onclick="useKitInCalc('${esc(k.id)}')" title="Рассчитать">📋</button>
+        <button class="btn btn-ghost btn-sm" onclick="useInCalc('${esc(k.article)}')" title="Рассчитать">📋</button>
         <button class="btn btn-danger btn-sm" onclick="deleteKit('${esc(k.id)}')" title="Удалить">✕</button>
       </div>
     </div>
@@ -335,42 +339,10 @@ function initKits() {
 }
 
 function editKit(id) { const k = kitsCache.find(x => x.id === id); if (k) openKitModal(k); }
-function useKitInCalc(id) { document.querySelector('[data-tab="calculator"]').click(); setCalcMode('kit'); document.getElementById('calc-kit-select').value = id; onKitSelected(id); }
 
 async function deleteKit(id) {
   if (!confirm('Удалить комплект?')) return;
   try { await loggedFetch(`${API_BASE}/api/kits/${id}`, { method: 'DELETE' }); showToast('Комплект удалён', 'success'); await loadKits(); } catch (e) { showToast('Ошибка удаления', 'error'); }
-}
-
-function updateKitSelect() {
-  const sel = document.getElementById('calc-kit-select');
-  sel.innerHTML = '<option value="">— Выберите комплект —</option>' + kitsCache.map(k => `<option value="${k.id}">${esc(k.article)} — ${esc(k.name)} (${k.totalPlaces} мест, ${k.totalWeight} кг)</option>`).join('');
-}
-
-async function onKitSelected(id) {
-  if (!id) { document.getElementById('kit-preview').classList.add('hidden'); currentKit = null; return; }
-  try {
-    const r = await loggedFetch(`${API_BASE}/api/kits/${id}`); const kit = await r.json();
-    currentKit = kit;
-    document.getElementById('kit-preview-name').textContent = kit.name;
-    const img = document.getElementById('kit-preview-img');
-    if (kit.image) { img.src = kit.image; img.classList.remove('hidden'); } else img.classList.add('hidden');
-    document.getElementById('kit-preview-totals').textContent = `📦 ${kit.totalPlaces} мест • ⚖️ ${kit.totalWeight} кг • 📐 ${kit.totalVolume.toFixed(4)} м³`;
-    document.getElementById('kit-items-list').innerHTML = kit.items.map(item => {
-      const p = item.product;
-      if (!p) return `<div class="kit-item-row"><span>❓ ${esc(item.article)} — не найден</span></div>`;
-      return `<div class="kit-item-row">
-        <div class="kit-item-img">${p.image ? `<img src="${p.image}" alt="">` : '📦'}</div>
-        <div class="kit-item-info">
-          <strong>${esc(p.name)}</strong>
-          <span>${p.length}×${p.width}×${p.height} м, ${p.weight} кг</span>
-        </div>
-        <div class="kit-item-qty">×${item.quantity}</div>
-      </div>`;
-    }).join('');
-    document.getElementById('kit-preview').classList.remove('hidden');
-    document.getElementById('calc-quantity').value = 1;
-  } catch (e) { showToast('Ошибка загрузки комплекта', 'error'); }
 }
 
 // ==================== KIT MODAL ====================
@@ -465,56 +437,101 @@ function updateKitTotals() {
   document.getElementById('kit-total-volume').textContent = `${totalV.toFixed(4)} м³`;
 }
 
-// ==================== CALCULATOR ====================
+// ==================== UNIFIED CALCULATOR ====================
 function initCalculator() {
-  document.getElementById('calc-find-btn').addEventListener('click', findProductForCalc);
-  document.getElementById('calc-article').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); findProductForCalc(); } });
+  document.getElementById('calc-find-btn').addEventListener('click', findArticleForCalc);
+  document.getElementById('calc-article').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); findArticleForCalc(); } });
   document.getElementById('calc-submit-btn').addEventListener('click', doCalculation);
-  document.getElementById('calc-kit-select').addEventListener('change', e => onKitSelected(e.target.value));
   document.querySelectorAll('input[name="carrier"]').forEach(input => {
     input.addEventListener('change', () => {
       document.querySelectorAll('.carrier-option').forEach(opt => opt.classList.toggle('active', opt.querySelector('input').checked));
     });
   });
-  // Source toggle
-  document.querySelectorAll('.source-btn').forEach(btn => {
-    btn.addEventListener('click', () => setCalcMode(btn.dataset.source));
-  });
 }
 
-function setCalcMode(mode) {
-  calcMode = mode;
-  document.querySelectorAll('.source-btn').forEach(b => b.classList.toggle('active', b.dataset.source === mode));
-  document.getElementById('product-source').classList.toggle('hidden', mode !== 'product');
-  document.getElementById('kit-source').classList.toggle('hidden', mode !== 'kit');
-}
-
-function findProductForCalc() {
+// Single search — finds products AND kits
+async function findArticleForCalc() {
   const article = document.getElementById('calc-article').value.trim();
   if (!article) { showToast('Введите артикул', 'info'); return; }
-  const product = productsCache.find(p => p.article.toLowerCase() === article.toLowerCase());
+
   const preview = document.getElementById('product-preview');
+  const kitPreview = document.getElementById('kit-preview');
+  const typeBadge = document.getElementById('preview-type-badge');
+
+  // 1. Search in products (case-insensitive)
+  const product = productsCache.find(p => p.article.toLowerCase() === article.toLowerCase());
   if (product) {
     currentProduct = product;
+    currentKit = null;
+    calcMode = 'product';
     document.getElementById('preview-name').textContent = product.name;
-    document.getElementById('preview-dims').textContent = `${product.length}×${product.width}×${product.height} м`;
-    document.getElementById('preview-weight').textContent = `${product.weight} кг`;
-    document.getElementById('preview-volume').textContent = `${product.volume.toFixed(4)} м³`;
+    typeBadge.textContent = '📦 Товар';
+    typeBadge.className = 'preview-type-badge badge-product';
+    document.getElementById('preview-dims').textContent = `📐 ${product.length}×${product.width}×${product.height} м`;
+    document.getElementById('preview-weight').textContent = `⚖️ ${product.weight} кг`;
+    document.getElementById('preview-volume').textContent = `📦 ${product.volume.toFixed(4)} м³`;
     const img = document.getElementById('preview-img');
     if (product.image) { img.src = product.image; img.classList.remove('hidden'); } else img.classList.add('hidden');
     document.getElementById('calc-quantity').value = product.quantity || 1;
     preview.classList.remove('hidden');
+    kitPreview.classList.add('hidden');
     showToast(`Товар: ${product.name}`, 'success');
-  } else {
-    currentProduct = null; preview.classList.add('hidden');
-    showToast(`Товар «${article}» не найден`, 'error');
+    return;
   }
+
+  // 2. Search in kits (case-insensitive)
+  const kit = kitsCache.find(k => k.article.toLowerCase() === article.toLowerCase());
+  if (kit) {
+    currentProduct = null;
+    calcMode = 'kit';
+
+    // Fetch enriched kit with product details
+    try {
+      const r = await loggedFetch(`${API_BASE}/api/kits/${kit.id}`);
+      currentKit = await r.json();
+    } catch (e) {
+      currentKit = kit;
+    }
+
+    document.getElementById('preview-name').textContent = currentKit.name;
+    typeBadge.textContent = `📋 Комплект (${currentKit.totalPlaces} мест)`;
+    typeBadge.className = 'preview-type-badge badge-kit';
+    document.getElementById('preview-dims').textContent = `🔢 ${currentKit.items.length} товар(ов)`;
+    document.getElementById('preview-weight').textContent = `⚖️ ${currentKit.totalWeight} кг`;
+    document.getElementById('preview-volume').textContent = `📦 ${currentKit.totalVolume.toFixed(4)} м³`;
+    const img = document.getElementById('preview-img');
+    if (currentKit.image) { img.src = currentKit.image; img.classList.remove('hidden'); } else img.classList.add('hidden');
+    document.getElementById('calc-quantity').value = 1;
+    preview.classList.remove('hidden');
+
+    // Show kit items breakdown
+    document.getElementById('kit-items-list').innerHTML = currentKit.items.map(item => {
+      const p = item.product;
+      if (!p) return `<div class="kit-item-row"><span>❓ ${esc(item.article)}</span></div>`;
+      return `<div class="kit-item-row">
+        <div class="kit-item-img">${p.image ? `<img src="${p.image}" alt="">` : '📦'}</div>
+        <div class="kit-item-info">
+          <strong>${esc(p.name)}</strong>
+          <span>${p.length}×${p.width}×${p.height} м, ${p.weight} кг</span>
+        </div>
+        <div class="kit-item-qty">×${item.quantity}</div>
+      </div>`;
+    }).join('');
+    kitPreview.classList.remove('hidden');
+    showToast(`Комплект: ${kit.name}`, 'success');
+    return;
+  }
+
+  // 3. Not found
+  currentProduct = null; currentKit = null;
+  preview.classList.add('hidden');
+  kitPreview.classList.add('hidden');
+  showToast(`Артикул «${article}» не найден ни в товарах, ни в комплектах`, 'error');
 }
 
 async function doCalculation() {
   // Validate
-  if (calcMode === 'product' && !currentProduct) { showToast('Найдите товар по артикулу', 'error'); return; }
-  if (calcMode === 'kit' && !currentKit) { showToast('Выберите комплект', 'error'); return; }
+  if (!currentProduct && !currentKit) { showToast('Найдите товар/комплект по артикулу', 'error'); return; }
   if (!selectedReceiverCity) { showToast('Выберите город получения', 'error'); document.getElementById('calc-receiver-city').focus(); return; }
   if (!selectedSenderCity) { showToast('Выберите город отправления', 'error'); document.getElementById('calc-sender-city').focus(); return; }
 
@@ -524,20 +541,16 @@ async function doCalculation() {
 
   // Build cargo
   let cargo;
-  if (calcMode === 'product') {
+  if (calcMode === 'product' && currentProduct) {
     cargo = {
       length: currentProduct.length, width: currentProduct.width, height: currentProduct.height,
       weight: currentProduct.weight, volume: currentProduct.volume, quantity: qtyMultiplier
     };
-  } else {
-    // Kit: use the largest dimensions among items, sum weight & volume
+  } else if (calcMode === 'kit' && currentKit) {
     let maxL = 0, maxW = 0, maxH = 0;
     currentKit.items.forEach(item => {
-      if (item.product) {
-        if (item.product.length > maxL) maxL = item.product.length;
-        if (item.product.width > maxW) maxW = item.product.width;
-        if (item.product.height > maxH) maxH = item.product.height;
-      }
+      const p = item.product || productsCache.find(x => x.article === item.article);
+      if (p) { maxL = Math.max(maxL, p.length); maxW = Math.max(maxW, p.width); maxH = Math.max(maxH, p.height); }
     });
     cargo = {
       length: maxL, width: maxW, height: maxH,
@@ -551,7 +564,6 @@ async function doCalculation() {
   document.getElementById('results-data').classList.add('hidden');
   document.getElementById('results-loading').classList.remove('hidden');
   document.getElementById('calc-submit-btn').disabled = true;
-  AppLog.info(`Расчёт: ${selectedSenderCity.name} → ${selectedReceiverCity.name}`);
 
   const allResults = [];
   try {
@@ -587,11 +599,11 @@ function renderResults(allResults) {
 
   let html = '';
 
-  // Show kit breakdown if in kit mode
+  // Kit breakdown in results
   if (calcMode === 'kit' && currentKit) {
-    html += `<div class="kit-breakdown"><h3>📋 Состав комплекта «${esc(currentKit.name)}»</h3><div class="kit-breakdown-items">`;
+    html += `<div class="kit-breakdown"><h3>📋 Комплект «${esc(currentKit.name)}»</h3><div class="kit-breakdown-items">`;
     currentKit.items.forEach(item => {
-      const p = item.product;
+      const p = item.product || productsCache.find(x => x.article === item.article);
       if (!p) return;
       html += `<div class="kit-breakdown-item">
         <div class="kit-breakdown-img">${p.image ? `<img src="${p.image}">` : '📦'}</div>

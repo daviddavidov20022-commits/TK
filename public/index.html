@@ -60,54 +60,34 @@
           <div class="card-header"><h2>Параметры отправления</h2></div>
           <div style="padding: 24px;">
 
-            <!-- Source type toggle -->
-            <div class="source-toggle" id="source-toggle">
-              <button class="source-btn active" data-source="product">📦 Товар</button>
-              <button class="source-btn" data-source="kit">📋 Комплект</button>
+            <!-- Unified article search -->
+            <div class="form-group">
+              <label for="calc-article">Артикул (товар или комплект)</label>
+              <div class="input-with-action">
+                <input type="text" id="calc-article" placeholder="Введите артикул..." autocomplete="off">
+                <button class="btn btn-accent" id="calc-find-btn">🔍</button>
+              </div>
             </div>
 
-            <!-- Product search -->
-            <div id="product-source">
-              <div class="form-group">
-                <label for="calc-article">Артикул товара</label>
-                <div class="input-with-action">
-                  <input type="text" id="calc-article" placeholder="Введите артикул...">
-                  <button class="btn btn-accent" id="calc-find-btn">🔍</button>
-                </div>
-              </div>
-              <div class="product-preview hidden" id="product-preview">
-                <div class="preview-row">
-                  <img class="preview-img" id="preview-img" src="" alt="">
-                  <div class="preview-info">
-                    <div class="preview-name" id="preview-name"></div>
-                    <div class="preview-params">
-                      <span id="preview-dims"></span>
-                      <span id="preview-weight"></span>
-                      <span id="preview-volume"></span>
-                    </div>
+            <!-- Product preview -->
+            <div class="product-preview hidden" id="product-preview">
+              <div class="preview-row">
+                <img class="preview-img" id="preview-img" src="" alt="">
+                <div class="preview-info">
+                  <div class="preview-name" id="preview-name"></div>
+                  <div class="preview-type-badge" id="preview-type-badge"></div>
+                  <div class="preview-params">
+                    <span id="preview-dims"></span>
+                    <span id="preview-weight"></span>
+                    <span id="preview-volume"></span>
                   </div>
                 </div>
               </div>
             </div>
 
-            <!-- Kit search -->
-            <div id="kit-source" class="hidden">
-              <div class="form-group">
-                <label for="calc-kit-select">Выберите комплект</label>
-                <select id="calc-kit-select">
-                  <option value="">— Загрузка комплектов... —</option>
-                </select>
-              </div>
-              <div class="kit-preview hidden" id="kit-preview">
-                <div class="kit-preview-header">
-                  <img class="kit-preview-img" id="kit-preview-img" src="" alt="">
-                  <div>
-                    <div class="kit-preview-name" id="kit-preview-name"></div>
-                    <div class="kit-preview-totals" id="kit-preview-totals"></div>
-                  </div>
-                </div>
-                <div class="kit-items-list" id="kit-items-list"></div>
-              </div>
+            <!-- Kit items preview (shown when kit is found) -->
+            <div class="kit-preview hidden" id="kit-preview">
+              <div class="kit-items-list" id="kit-items-list"></div>
             </div>
 
             <div class="form-group">
