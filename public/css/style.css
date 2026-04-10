@@ -1586,3 +1586,36 @@ input.city-selected {
 .city-input-wrapper:has(input.city-selected)::after {
   opacity: 1;
 }
+
+/* Save sender city button */
+.btn-save-city {
+  position: absolute;
+  right: 36px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  color: var(--accent-1);
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-save-city:hover {
+  background: rgba(99, 102, 241, 0.3);
+  border-color: var(--accent-1);
+  transform: translateY(-50%) scale(1.05);
+}
+
+.city-input-wrapper:has(.btn-save-city) input {
+  padding-right: 72px;
+}
+
+.city-input-wrapper:has(.btn-save-city)::after {
+  right: 48px;
+}

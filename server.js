@@ -117,6 +117,44 @@ app.delete('/api/products/:article', (req, res) => {
   res.json({ success: true });
 });
 
+// ==================== SETTINGS (SENDER CITY PERSISTENCE) ====================
+
+const SETTINGS_FILE = path.join(__dirname, 'data', 'settings.json');
+
+function readSettings() {
+  try {
+    const data = fs.readFileSync(SETTINGS_FILE, 'utf-8');
+    return JSON.parse(data);
+  } catch {
+    return {};
+  }
+}
+
+function writeSettings(settings) {
+  try {
+    if (!fs.existsSync(path.dirname(SETTINGS_FILE))) {
+      fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+    }
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Error saving settings:', err);
+  }
+}
+
+// GET settings
+app.get('/api/settings', (req, res) => {
+  res.json(readSettings());
+});
+
+// POST save settings
+app.post('/api/settings', (req, res) => {
+  const current = readSettings();
+  const updated = { ...current, ...req.body };
+  writeSettings(updated);
+  console.log('Settings saved:', JSON.stringify(updated));
+  res.json(updated);
+});
+
 // ==================== DELLIN AUTH ====================
 
 let dellinSessionID = null;
